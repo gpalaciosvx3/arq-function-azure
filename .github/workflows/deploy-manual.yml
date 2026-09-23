@@ -1,0 +1,23 @@
+name: Deploy manual · Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Rama, tag o SHA a desplegar'
+        required: true
+        default: master
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: gpalaciosvx3/pt-ci-pipelines/.github/workflows/azure-functions-deploy.yml@v1
+    with:
+      ref: ${{ inputs.ref }}

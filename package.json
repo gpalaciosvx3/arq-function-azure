@@ -1,0 +1,45 @@
+{
+  "name": "arq-function-azure",
+  "version": "1.0.0",
+  "description": "Arquetipo de Azure Function — NestJS sobre @gpkit/*. Solo código; el Function App y lo compartido viven en IaC",
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p infra",
+    "lint": "eslint .",
+    "test": "jest --coverage",
+    "arch:check": "depcruise --config .dependency-cruiser.js src infra",
+    "build": "ts-node --transpile-only -P infra/tsconfig.json infra/bin/package.ts",
+    "start": "npm run build && cd dist && func start",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"infra/**/*.ts\"",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "@gpkit/azure-functions": "^1.0.0",
+    "@gpkit/core": "^1.0.0",
+    "@nestjs/common": "^10.4.0",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@gpkit/arch-rules": "^1.0.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.19.37",
+    "dependency-cruiser": "^18.1.0",
+    "esbuild": "^0.21.5",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-import-x": "^4.17.1",
+    "husky": "^9.1.7",
+    "jest": "^29.7.0",
+    "jest-cucumber": "^4.4.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3",
+    "ts-jest": "29.4.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.70.0"
+  },
+  "lint-staged": {
+    "{src,test,infra}/**/*.ts": "prettier --write"
+  }
+}
