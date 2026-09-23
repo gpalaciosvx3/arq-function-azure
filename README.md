@@ -1,115 +1,120 @@
 # arq-function-azure
 
-Arquetipo de **Azure Function** (modelo de programación v4 de Node) con NestJS, Clean Architecture y pruebas BDD. Incluye una feature de referencia `ping/pong` completa.
+Arquetipo de **Azure Function** (modelo de programación v4 de Node) con NestJS, Clean Architecture y pruebas BDD. Es solo código: el Function App y toda la infraestructura viven en el repo de IaC. Incluye la feature de referencia `ping/pong`.
 
-El repo es **solo código**. El Function App, su plan, el storage account, Application Insights, los app settings y todo lo compartido —API Management, colas, Service Bus, bases de datos— viven en el repo de IaC (Terraform). `infra/` aquí no crea recursos: solo empaqueta y dice a qué Function App va el código.
-
-Es el gemelo de [`arq-function-aws`](https://github.com/gpalaciosvx3/arq-function-aws). `domain/`, `application/` y `test/` son **idénticos** en ambos; cambia solo `infrastructure/` y la forma de desplegar.
+| Ficha | |
+|---|---|
+| Destino | Azure Functions (plan Flex Consumption) |
+| Runtime | Node.js 20 · TypeScript 5.5 strict |
+| Framework | NestJS 10 (context-based, sin servidor HTTP) |
+| Plataforma | `@gpkit/core` · `@gpkit/azure-functions` · `@gpkit/arch-rules` |
+| Artefacto | Paquete zip (`dist/`) montado sobre un Function App existente |
+| Despliegue | `azure-functions-deploy` |
+| Contrato IaC | Nomenclatura `{REGION}{PROYECTO}{SERVICIO}{NNN}` |
 
 ---
 
 ## Índice
 
-- [Qué es de este repo y qué no](#qué-es-de-este-repo-y-qué-no)
-- [Diferencias con el gemelo AWS](#diferencias-con-el-gemelo-aws)
-- [Las librerías de la plataforma](#las-librerías-de-la-plataforma)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Feature de referencia: ping/pong](#feature-de-referencia-pingpong)
-- [Empaquetado](#empaquetado)
-- [Instalación y desarrollo local](#instalación-y-desarrollo-local)
-- [CI/CD](#cicd)
+1. [Alcance](#1-alcance)
+2. [Arquitectura](#2-arquitectura)
+3. [Plataforma](#3-plataforma)
+4. [Feature de referencia](#4-feature-de-referencia)
+5. [Desarrollo local](#5-desarrollo-local)
+6. [Calidad](#6-calidad)
+7. [Despliegue](#7-despliegue)
+8. [Contrato con IaC](#8-contrato-con-iac)
+9. [Anexos](#9-anexos)
 
 ---
 
-## Qué es de este repo y qué no
+## 1. Alcance
 
 | Recurso | Dónde vive |
 |---|---|
-| El código de la función y la declaración de su trigger (`app.http`, `app.storageQueue`, …) | **Aquí** |
-| Function App, plan Flex Consumption, storage account, Application Insights | IaC |
-| App settings de la función (nombres de colas, connection strings, Key Vault references) | IaC |
-| API Management: la API pública, sus operaciones, políticas, CORS, dominio | IaC |
+| Código de la función y declaración de su trigger (`app.http`, `app.storageQueue`, …) | **Aquí** (`src/`) |
+| Empaquetado y Function App destino | **Aquí** (`infra/`, no crea recursos) |
+| Function App, plan, storage account, Application Insights | IaC |
+| App settings (nombres de colas, connection strings, Key Vault references) | IaC |
+| API Management: API pública, operaciones, políticas, CORS, dominio | IaC |
 | Colas, Service Bus, Event Grid, Cosmos DB | IaC |
 
-En Azure Functions el trigger **se declara en el código**, no es un recurso aparte: no hay equivalente al event source mapping ni al permiso de invocación de Lambda. Por eso este repo no necesita IaC propia y el de AWS sí necesita un mínimo.
-
-### Y el endpoint, ¿no quedaba en IaC?
-
-Sí. La ruta de `app.http` es **interna** del Function App (`https://<app>.azurewebsites.net/api/ping`) y exige la function key (`authLevel: 'function'`). El endpoint que consumen los clientes es una operación de **API Management**, declarada en IaC, que reenvía al Function App con la key guardada como named value. Es el mismo reparto que en AWS entre el HTTP API (IaC) y la función (este repo).
-
 ---
 
-## Diferencias con el gemelo AWS
+## 2. Arquitectura
 
-| | `arq-function-aws` | `arq-function-azure` |
-|---|---|---|
-| Factory | `ApiGwHandlerFactory` (`@gpkit/aws-lambda`) | `HttpHandlerFactory` (`@gpkit/azure-functions`) |
-| Controller | `ApiGwController` + `ApiGwHelper` | `HttpController` + `HttpHelper` |
-| Registro del trigger | IaC: la integración invoca la función por nombre | Código: `app.http(...)` en `ping.handler.ts` |
-| Nombre del destino | `infra/common/constants/naming.constants.ts` (función) | `infra/common/constants/naming.constants.ts` (Function App) |
-| Constantes del trigger | — (IaC declara la ruta) | `src/ping/infrastructure/constants/ping-trigger.constants.ts` |
-| Empaquetado | esbuild vía `NodejsFunction` (`lib/.../bundling.config.ts`) | esbuild vía `FunctionPackage` (`lib/package/bundling.config.ts`) |
-| Qué ejecuta `infra/` | `cdk deploy`: crea la función y su rol | `npm run build`: arma `dist/`, que `Azure/functions-action` sube al Function App |
-| Logging | Powertools (JSON + X-Ray + EMF) | `InvocationContext` → Application Insights, correlacionado por `invocationId` |
-| Despliegue | `aws-cdk-deploy` | `azure-functions-deploy` |
-| Destroy | `aws-cdk-destroy` | No existe: el repo no es dueño de ningún recurso |
-
-Lo que **no** cambia: la forma de `event.parsed` (`body`, `params`/`pathParameters`, `query`, `headers`), los cuerpos de respuesta `ApiSuccessBody` / `ApiErrorBody`, los errores `CORE-*` y el formato de logs `--- start/end ---` y `[PASO N]`.
-
----
-
-## Las librerías de la plataforma
-
-| Paquete | Qué aporta a este proyecto |
-|---|---|
-| `@gpkit/core` | `CustomException`, `ValidationException`, `ErrorDictionary`, contrato `Logger` + `getLogger()`, `@HandleExecution`, tipos `ApiSuccessBody`/`ApiErrorBody`, procesamiento por lotes |
-| `@gpkit/azure-functions` | `HttpHandlerFactory`, `HttpHelper`, logger ligado a la invocación |
-| `@gpkit/arch-rules` | Perfil de dependency-cruiser que verifica las fronteras entre capas |
-
-**Regla dura:** si algo de una librería resuelve lo que necesitas, se usa. Si no cubre un caso real —hoy `@gpkit/azure-functions` trae solo el trigger HTTP— se agrega allí, en `pt-npm-packages`, no aquí.
-
-**Solo `infrastructure/` importa `@gpkit/azure-functions` y `@azure/functions`.** `domain/` y `application/` usan únicamente `@gpkit/core`.
-
----
-
-## Estructura del proyecto
+### Estructura
 
 ```
 arq-function-azure/
   src/
     common/
-      constants/env.constants.ts   # Variables de entorno obligatorias por función
+      constants/env.constants.ts      # Variables de entorno obligatorias por función
       errors/app.error-dictionary.ts  # Errores de negocio propios (prefijo ARQ-)
     ping/
-      domain/                      # ← idéntico en arq-function-aws
-      application/                 # ← idéntico en arq-function-aws
-      infrastructure/              # ← lo único propio de Azure en src/
-        bootstrap/                 # PingModule, ping.handler.ts (app.http + factory)
-        constants/                 # Nombre, ruta y métodos del trigger
-        controller/                # PingController + @HandleExecution + HttpHelper
+      domain/                         # Agnóstico de la nube — solo @gpkit/core
+        constants/  mapper/  service/  types/
+      application/                    # Agnóstico de la nube — solo @gpkit/core
+        dtos/  use-cases/
+      infrastructure/                 # Lo único propio de Azure Functions en src/
+        bootstrap/                    # PingModule + ping.handler.ts (app.http + factory)
+        constants/                    # Nombre, ruta y métodos del trigger
+        controller/                   # PingController + @HandleExecution + HttpHelper
   test/
-    ping/                          # ← idéntico en arq-function-aws
-  infra/                           # Todo lo de despliegue a Azure; no crea recursos
-    bin/
-      package.ts                   # Entry point — arma dist/ (equivale a bin/ping.ts de CDK)
+    ping/                             # features/*.feature + *.steps.ts
+  infra/
+    bin/package.ts                    # Entry point — arma dist/
     lib/
       package/
-        bundling.config.ts         # Opciones de esbuild compartidas
-        function-package.ts        # Bundles + host.json + manifiesto con el Function App destino
-    common/
-      constants/
-        naming.constants.ts        # Nombre canónico del Function App — el contrato con IaC
-        resource.constants.ts      # Alias semánticos
-        infra.constants.ts         # Target de Node, nombres de archivo del paquete
+        bundling.config.ts            # Opciones de esbuild compartidas
+        function-package.ts           # Bundles + host.json + manifiesto con el Function App destino
+    common/constants/
+      naming.constants.ts             # Nombre canónico del Function App — el contrato con IaC
+      resource.constants.ts           # Alias semánticos
+      infra.constants.ts              # Target de Node, nombres de archivo del paquete
     config/
-      host.json                    # Configuración del host de Functions
-      local.settings.example.json  # Plantilla de infra/config/local.settings.json (no versionado)
+      host.json                       # Configuración del host de Functions
+      local.settings.example.json     # Plantilla de local.settings.json (no versionado)
     tsconfig.json
 ```
 
+### Stack técnico
+
+| Capa | Tecnología |
+|---|---|
+| Runtime | Node.js 20, TypeScript 5.5 strict |
+| Framework | NestJS 10 |
+| Modelo de Functions | `@azure/functions` v4 |
+| Observabilidad | `InvocationContext` → Application Insights (vía `@gpkit/azure-functions`) |
+| Validación | Zod 3.x |
+| Tests | jest-cucumber 4.x |
+| Arquitectura | dependency-cruiser + `@gpkit/arch-rules` |
+| Empaquetado | esbuild |
+| Calidad | ESLint + Prettier + Husky |
+
+### Capas
+
+`domain/` y `application/` importan únicamente `@gpkit/core`: el logger lo obtienen con `getLogger()`, que la factory deja registrado al arrancar. Solo `infrastructure/` conoce `@azure/functions` y `@gpkit/azure-functions`.
+
 ---
 
-## Feature de referencia: ping/pong
+## 3. Plataforma
+
+| Paquete | Qué aporta |
+|---|---|
+| `@gpkit/core` | `CustomException`, `ValidationException`, `ErrorDictionary`, `getLogger()`, `@HandleExecution`, tipos `ApiSuccessBody` / `ApiErrorBody`, procesamiento por lotes |
+| `@gpkit/azure-functions` | `HttpHandlerFactory`, `HttpHelper`, logger ligado a la invocación |
+| `@gpkit/arch-rules` | Perfil de dependency-cruiser con las fronteras entre capas |
+
+**No instalado:** no existe aún un paquete de clientes de servicios de Azure. Nacerá en `pt-npm-packages` con el primer servicio real (Blob, Queue, Service Bus, Cosmos DB).
+
+**Regla dura:** si una librería resuelve lo que necesitas, se usa. Si no cubre un caso real —hoy `@gpkit/azure-functions` trae solo el trigger HTTP— se agrega en `pt-npm-packages`, no aquí.
+
+---
+
+## 4. Feature de referencia
+
+La ruta del Function App es interna y exige la function key. El endpoint público lo declara IaC en API Management.
 
 ```
 POST /api/ping?code=<function-key>
@@ -118,18 +123,14 @@ Content-Type: application/json
 { "message": "hello" }
 ```
 
-**Response `200`:**
+**`200`**
+
 ```json
-{
-  "data": {
-    "message": "pong",
-    "echo": "hello",
-    "receivedAt": "2026-05-27T10:00:00.000Z"
-  }
-}
+{ "data": { "message": "pong", "echo": "hello", "receivedAt": "2026-05-27T10:00:00.000Z" } }
 ```
 
-**Response `400` — mensaje vacío:**
+**`400`** — mensaje vacío
+
 ```json
 {
   "code": "CORE-001",
@@ -138,40 +139,24 @@ Content-Type: application/json
 }
 ```
 
----
+| Código | HTTP | Descripción |
+|---|---|---|
+| `CORE-001` | 400 | El cuerpo de la solicitud no es válido |
+| `CORE-002` | 500 | Ocurrió un error inesperado |
+| `CORE-003` | 500 | Variable de entorno requerida no encontrada |
+| `CORE-004` | 403 | No tiene autorización para acceder a este recurso |
 
-## Empaquetado
-
-`npm run build` deja en `dist/` exactamente lo que se monta en el Function App:
-
-```
-dist/
-  host.json
-  package.json          # { "name": "UE1ARQFNA001", "main": "*.handler.js" }
-  ping.handler.js       # bundle con NestJS, @gpkit/* y la feature
-```
-
-- El `name` es el Function App destino, tomado de `ResourceConstants.FUNCTION_APP`. `azure-functions-deploy` lo lee de ahí: no hay variable con el nombre.
-- Un bundle por archivo `src/<feature>/infrastructure/bootstrap/*.handler.ts`. Una feature nueva se registra sola.
-- **Sin `node_modules`** en el despliegue, igual que en Lambda. El despliegue no depende de un build remoto.
-- `@azure/functions-core` queda fuera del bundle: lo inyecta el worker de Node en tiempo de ejecución.
-- NestJS se empaqueta sin `emitDecoratorMetadata` (esbuild no lo soporta). Por eso el wiring de `ping.module.ts` es explícito con `useFactory`, igual que en AWS: la regla de estilo es además la que hace posible el bundle.
+Los `CORE-*` vienen de `@gpkit/core`. Los errores de negocio van en `src/common/errors/app.error-dictionary.ts` con prefijo propio.
 
 ---
 
-## Instalación y desarrollo local
+## 5. Desarrollo local
 
 ```bash
 npm install
-
-npm run typecheck
-npm run lint
-npm run arch:check
-npm test
-npm run format
 ```
 
-Para correr la función en local hacen falta [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) y, para triggers que no sean HTTP, [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite):
+Para correr la función hacen falta [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) y, para triggers que no sean HTTP, [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite):
 
 ```bash
 cp infra/config/local.settings.example.json infra/config/local.settings.json
@@ -186,22 +171,79 @@ En local no se exige la function key.
 
 ---
 
-## CI/CD
+## 6. Calidad
 
-| Archivo | Trigger | Acción |
+| Script | Qué verifica |
+|---|---|
+| `npm run typecheck` | Tipos de `src/`, `test/` e `infra/` |
+| `npm run lint` | ESLint |
+| `npm run arch:check` | Fronteras de capas sobre `src/` e `infra/` |
+| `npm test` | Escenarios BDD (jest-cucumber) con cobertura mínima del 80% |
+| `npm run format` | Prettier |
+
+Reglas de `arch:check`: ninguna feature importa internos de otra; `domain/` no conoce `application/` ni `infrastructure/`; `application/` no conoce `infrastructure/`; `src/common/` no depende de features; `src/` e `infra/` no se cruzan. La carpeta **debe** llamarse `infra/`: las reglas anclan ahí su ruta.
+
+Hooks: `lint-staged` en `pre-commit`, `arch:check` en `pre-push`.
+
+---
+
+## 7. Despliegue
+
+| Workflow | Disparador | Acción |
 |---|---|---|
-| `deploy.yml` | `pull_request` a `master` | `node-validate`: tipos, lint, `arch:check`, tests y `npm run build` (lo detecta por `infra/config/host.json`) |
+| `deploy.yml` | `pull_request` a `master` | `node-validate`: tipos, lint, `arch:check`, tests y `npm run build` |
 | `deploy.yml` | `push` a `master` | `azure-functions-deploy` |
 | `deploy-manual.yml` | Manual | Despliega cualquier rama, tag o SHA |
 
-Las plantillas viven en [`pt-ci-pipelines`](https://github.com/gpalaciosvx3/pt-ci-pipelines) y autentican por **OIDC** (`azure/login`): no hay publish profile ni secretos en el repo.
+No hay workflow de destroy: el repo no es dueño de ningún recurso. Las plantillas viven en `pt-ci-pipelines` y autentican por OIDC (`azure/login`).
 
-**Environment `deployer` — Variables:**
+**Variables del environment `deployer`**
+
+| Variable | Uso |
+|---|---|
+| `AZURE_CLIENT_ID` | Identidad con credencial federada para el repo |
+| `AZURE_TENANT_ID` | Tenant de Entra ID |
+| `AZURE_SUBSCRIPTION_ID` | Suscripción destino |
+
+Son comunes a todos los repos y pueden definirse a nivel de organización. La identidad necesita el rol **Website Contributor** sobre el Function App.
+
+**Qué despliega:** el contenido de `dist/` (ver [9.1](#91-empaquetado)) sobre el Function App `UE1ARQFNA001`. El nombre no es una variable: sale del manifiesto del paquete.
+
+---
+
+## 8. Contrato con IaC
+
+**Nomenclatura, sin SSM.** Ambos lados construyen el mismo nombre con `{REGION}{PROYECTO}{SERVICIO}{NNN}`: Terraform crea el recurso y este repo lo declara en `infra/common/constants/naming.constants.ts`.
+
+| Dirección | Qué | Cómo |
+|---|---|---|
+| IaC → función | Function App `UE1ARQFNA001` | Lo crea IaC; este repo solo sube código a ese nombre |
+| IaC → función | Endpoint público | Operación de API Management que reenvía al Function App con la function key guardada como named value |
+| IaC → función | Nombres de colas, conexiones | App settings del Function App, leídos como variables de entorno (`EnvConstants`) |
+
+- **Orden del primer despliegue:** IaC primero, este repo después.
+
+---
+
+## 9. Anexos
+
+### 9.1 Empaquetado
+
+`npm run build` deja en `dist/` exactamente lo que se monta en el Function App:
 
 ```
-AZURE_CLIENT_ID          # Identidad con credencial federada para este repo
-AZURE_TENANT_ID
-AZURE_SUBSCRIPTION_ID
+dist/
+  host.json
+  package.json          # { "name": "UE1ARQFNA001", "main": "*.handler.js" }
+  ping.handler.js       # bundle con NestJS, @gpkit/* y la feature
 ```
 
-Son el equivalente del rol IAM de AWS: identidad, tenant y suscripción, comunes a todos los repos (se pueden definir a nivel de organización). La identidad solo necesita el rol **Website Contributor** sobre el Function App.
+- El `name` es el Function App destino, tomado de `ResourceConstants.FUNCTION_APP`. `azure-functions-deploy` lo lee de ahí.
+- Un bundle por archivo `src/<feature>/infrastructure/bootstrap/*.handler.ts`: una feature nueva se registra sola.
+- Sin `node_modules`: el despliegue no depende de un build remoto.
+- `@azure/functions-core` queda fuera del bundle: lo inyecta el worker de Node en tiempo de ejecución.
+- esbuild no soporta `emitDecoratorMetadata`. Por eso el wiring de `ping.module.ts` es explícito con `useFactory`: la regla de estilo es además la que hace posible el bundle.
+
+### 9.2 Observabilidad
+
+`HttpHandlerFactory.build()` registra en `@gpkit/core` un logger que escribe por el `InvocationContext` de la invocación en curso, con el formato `--- feature start/end ---` y `[PASO N]`. Application Insights correlaciona cada línea con su `invocationId` y recolecta requests y dependencias por su cuenta.
