@@ -20,4 +20,5 @@ jobs:
   deploy:
     uses: gpalaciosvx3/pt-ci-pipelines/.github/workflows/azure-functions-deploy.yml@v1
     with:
+      node-version: '22'
       ref: ${{ inputs.ref }}
