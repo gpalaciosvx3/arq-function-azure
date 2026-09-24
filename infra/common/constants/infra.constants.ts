@@ -1,5 +1,5 @@
 export class InfraConstants {
-  static readonly NODE_TARGET = 'node20';
+  static readonly NODE_TARGET = 'node22';
 
   static readonly HANDLER_SUFFIX = '.handler.ts';
 

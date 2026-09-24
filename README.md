@@ -21,7 +21,7 @@ Arquetipo de **Azure Function** (modelo de programación v4 de Node) con NestJS,
 | Ficha | |
 |---|---|
 | Destino | Azure Functions (plan Flex Consumption) |
-| Runtime | Node.js 20 · TypeScript 5.5 strict |
+| Runtime | Node.js 22 · TypeScript 5.5 strict |
 | Framework | NestJS 10 (context-based, sin servidor HTTP) |
 | Plataforma | `@gpkit/core` · `@gpkit/azure-functions` · `@gpkit/arch-rules` |
 | Artefacto | Paquete zip (`dist/`) montado sobre un Function App existente |
@@ -98,7 +98,7 @@ arq-function-azure/
 
 | Capa | Tecnología |
 |---|---|
-| Runtime | Node.js 20, TypeScript 5.5 strict |
+| Runtime | Node.js 22, TypeScript 5.5 strict |
 | Framework | NestJS 10 |
 | Modelo de Functions | `@azure/functions` v4 |
 | Observabilidad | `InvocationContext` → Application Insights (vía `@gpkit/azure-functions`) |
